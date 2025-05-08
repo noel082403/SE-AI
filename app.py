@@ -1,70 +1,53 @@
-import ollama
 import streamlit as st
-import torch
+import numpy as np
+import pickle
+from nbconvert import PythonExporter
+import nbformat
+from llm_helper import get_gemini_response
 
-st.title("Ollama Python Chatbot")
+# Function to execute the notebook
+def execute_notebook(notebook_path):
+    # Load the notebook
+    with open(notebook_path) as f:
+        notebook_content = nbformat.read(f, as_version=4)
 
-# # # Initialize session state for chat history
-if "messages" not in st.session_state:
-     st.session_state["messages"] = []
+    # Convert notebook to Python code
+    exporter = PythonExporter()
+    code, _ = exporter.from_notebook_node(notebook_content)
 
-# # # Initialize session state for the selected model
-if "model" not in st.session_state:
-     st.session_state["model"] = ""
+    # Execute the code
+    exec(code)
 
-# # # Get the list of available models safely
-models = []
-try:
-     model_response = ollama.list()
-# #     # Print the structure of the model response to debug
-     st.write(model_response)  # This will show the structure in the Streamlit app
-# #
-# #     # Check for the models key and fetch model names correctly using 'model' key
-     if "models" in model_response:
-         models = [model["model"] for model in model_response["models"]]
-     else:
-         st.error("No 'models' key found in the response.")
-# #
-     if not models:
-         st.error("No models available.")
-except Exception as e:
-     st.error(f"Error fetching models: {str(e)}")
-# #
-# # # If models are available, show the model selection dropdown
-if models:
-     st.session_state["model"] = st.selectbox("Choose your model", models)
-else:
-     st.session_state["model"] = "mistral:latest"  # Default to 'mistral:latest' if no models are available
-# #
-# #
-def model_res_generator():
-# #     # Check if CUDA (GPU) is available, otherwise fall back to CPU
-     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-# #
-# #     # Stream the chatbot response using the selected model
-     stream = ollama.chat(
-         model=st.session_state["model"],
-         messages=st.session_state["messages"],
-         stream=True,
-     )
-# #
-     for chunk in stream:
-         yield chunk["message"]["content"]
-# #
-# #
-# # # Display chat messages from history on app rerun
-for message in st.session_state["messages"]:
-     with st.chat_message(message["role"]):
-         st.markdown(message["content"])
+# Run the notebook when the app starts
+execute_notebook('Rock_vs_Mine_Prediction.ipynb')
 
-# # Handle user input and chat interactions
-if prompt := st.chat_input("Enter prompt here.."):
-# #     # Add the user's message to history
-     st.session_state["messages"].append({"role": "user", "content": prompt})
-# #
-     with st.chat_message("user"):
-         st.markdown(prompt)
-# #
-     with st.chat_message("assistant"):
-         message = st.write_stream(model_res_generator())
-         st.session_state["messages"].append({"role": "assistant", "content": message})
+# Load the trained model
+with open("rock_vs_mine_model.pkl", "rb") as f:
+    model = pickle.load(f)
+
+# Streamlit UI
+st.title("Rock vs Mine Prediction")
+st.write("Enter 60 SONAR feature values to predict if it's a rock or a mine.")
+
+# Input form
+input_data = []
+for i in range(60):
+    value = st.number_input(f"Feature {i+1}", min_value=0.0, max_value=1.0, step=0.01)
+    input_data.append(value)
+
+# Predict button
+if st.button("Predict"):
+    input_array = np.array(input_data).reshape(1, -1)
+    prediction = model.predict(input_array)[0]
+
+    if prediction == 1:
+        result = "Mine"
+    else:
+        result = "Rock"
+
+    st.success(f"Prediction: {result}")
+    
+    # Get model explanation (replace with your function for explanation)
+    prompt = f"Explain why the model predicted '{result}' for the given SONAR feature values."
+    explanation = get_gemini_response(prompt)
+    st.info(f"AI Explanation:\n{explanation}")
